@@ -1,14 +1,11 @@
-use anyhow::{anyhow, bail, Context, Result};
+/*
+ * Copyright 2024 Oxide Computer Company
+ */
+
+use anyhow::{bail, Result};
 use bytes::{Buf, BufMut, BytesMut};
-use p256::ecdsa::signature::Verifier;
-use serde::{Deserialize, Serialize};
-use slog::{info, Logger};
 use ssh_encoding::Decode;
 use ssh_key::{PublicKey, Signature};
-use std::{
-    path::Path,
-    time::{SystemTime, UNIX_EPOCH},
-};
 use tokio::{
     io::{AsyncReadExt, AsyncWriteExt},
     net::UnixStream,

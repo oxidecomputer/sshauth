@@ -1,7 +1,10 @@
+/*
+ * Copyright 2024 Oxide Computer Company
+ */
+
 use anyhow::{bail, Result};
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
-use ssh_encoding::{Decode, Encode};
 use ssh_key::{Fingerprint, Signature};
 
 /**
@@ -315,8 +318,6 @@ pub enum TokenIdentity {
 
 #[cfg(test)]
 mod test {
-    use std::io::Write;
-
     use super::*;
 
     fn dump(v: &[u8]) {

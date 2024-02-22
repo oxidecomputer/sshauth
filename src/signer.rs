@@ -1,3 +1,7 @@
+/*
+ * Copyright 2024 Oxide Computer Company
+ */
+
 use anyhow::{bail, Result};
 use ecdsa::signature::Signer;
 use ssh_key::{Algorithm, EcdsaCurve, PrivateKey, PublicKey};

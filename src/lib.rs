@@ -1,18 +1,8 @@
-#![allow(unused_imports)]
+/*
+ * Copyright 2024 Oxide Computer Company
+ */
 
-use anyhow::{anyhow, bail, Context, Result};
-use bytes::{Buf, BufMut, BytesMut};
-use p256::ecdsa::signature::Verifier;
-use serde::{Deserialize, Serialize};
-use slog::{info, Logger};
-use std::{
-    path::Path,
-    time::{SystemTime, UNIX_EPOCH},
-};
-use tokio::{
-    io::{AsyncReadExt, AsyncWriteExt},
-    net::UnixStream,
-};
+use std::time::{SystemTime, UNIX_EPOCH};
 
 const MAGIC_PREFIX_DEFAULT: [u8; 8] = *b"byo.e.m.";
 
@@ -86,7 +76,7 @@ impl std::fmt::Display for VerifiedToken {
 #[cfg(test)]
 mod test {
     use crate::*;
-    use anyhow::Result;
+    use anyhow::{bail, Result};
 
     #[allow(unused)]
     struct TestKey {

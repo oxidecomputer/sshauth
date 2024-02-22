@@ -1,8 +1,11 @@
+/*
+ * Copyright 2024 Oxide Computer Company
+ */
+
 use std::borrow::Borrow;
 
 use anyhow::{bail, Result};
 use ecdsa::signature::Verifier;
-use serde::{Deserialize, Serialize};
 use ssh_key::{Fingerprint, PublicKey, Signature};
 
 use crate::token::{

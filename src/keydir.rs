@@ -1,7 +1,11 @@
+/*
+ * Copyright 2024 Oxide Computer Company
+ */
+
 use std::path::{Path, PathBuf};
 
 use anyhow::{anyhow, bail, Result};
-use ssh_key::{AuthorizedKeys, PublicKey};
+use ssh_key::PublicKey;
 
 use crate::token::TokenIdentity;
 

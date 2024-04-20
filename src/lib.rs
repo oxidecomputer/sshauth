@@ -11,6 +11,7 @@ const MAGIC_SUPER_SUFFIX: [u8; 6] = *b"htuaxo";
 
 pub mod agent;
 pub mod keydir;
+pub mod keyfile;
 pub mod signer;
 pub mod token;
 pub mod unverified;

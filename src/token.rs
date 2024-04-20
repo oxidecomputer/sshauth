@@ -9,10 +9,17 @@ use ssh_key::{Fingerprint, Signature};
 
 /**
  * This structure is used to assemble the blob of bytes that we use to produce
- * the signature.  To reduce the size of the token, we want to omit any fields
- * that we can correctly construct on the receiving side.  In particular, the
- * action list is not transmitted in the actual token, as it should refer to
- * values that are sent in the actual request.
+ * the signature that is included in the token.  To reduce the size of the
+ * token, we want to omit any fields that we can correctly construct on the
+ * receiving side.  In particular, the action list is not transmitted in the
+ * actual token, as it should refer to values that are sent in the actual
+ * request, using a pattern established at the level of the consuming system.
+ *
+ * Because of this design, the size of the blob is not especially relevant;
+ * first, because it is not transmitted, as described above; second, because the
+ * blob is turned into a fixed length digest prior to passing it to the SSH
+ * agent, which may itself be remote from the system that is generating the
+ * token.
  *
  * NOTE: The format of this blob is committed, as both sides need to agree on
  * its shape for signature construction to work!
@@ -41,6 +48,29 @@ impl TokenSigningBlobV1 {
      * system) to reduce the likelihood of cross-protocol attacks.  The output
      * SHA-256 hash value is then itself wrapped in the same prefix and suffix,
      * ready to be fed to the SSH agent for signing.
+     *
+     *       Digest Input:
+     *     / +----------+
+     *     | | oxauth   | (magic super prefix; 6 bytes)
+     *     | +----------+
+     *     | | byo.e.m. | (magic per-system prefix; 8 bytes)
+     *    -+ +----------+
+     *   / | | <blob>   | (postcard-encoded TokenSigningBlobV1; variable len.)
+     *   | | +----------+
+     *   | | | htuaxo   | (magic super suffix; 6 bytes)
+     *   | \ +----------+
+     *   |
+     *   |                             Packed Output
+     *   |                             for Signing:
+     *   |                             +----------+
+     *   |                             | oxauth   |
+     *   |                             +----------+
+     *   |                             | byo.e.m. |
+     *   |                             +----------+
+     *   \_-- SHA-256 Digest --------> | digest   |
+     *                                 +----------+
+     *                                 | htuaxo   |
+     *                                 +----------+
      */
     pub(crate) fn pack(&self, magic_prefix: [u8; 8]) -> Vec<u8> {
         /*
@@ -86,9 +116,10 @@ impl TokenSigningBlobV1 {
 
 /**
  * The Token type tree is laid out for use with postcard in two capacities: the
- * "signed" member represents the transmitted subset of the overall signing
- * blob, and the overall structure includes the generated signature and is
- * encoded by the system and sent to the server for decoding and verification.
+ * "signed" member represents the transmitted subset of the overall signing blob
+ * (see TokenSigningBlobV1), and the overall structure includes the generated
+ * signature and is encoded by the system and sent to the server for decoding
+ * and verification.
  *
  * The final token is constructed by postcard-encoding this structure, and then
  * those bytes are further base64-encoded so that they can be included in HTTP
@@ -98,7 +129,8 @@ impl TokenSigningBlobV1 {
  * If you need to add another enum variant, it must be appended to the variant
  * list.  Existing variants must not be removed.  Members may not be added to
  * structs!  If you need a new struct member, a new variant must be added
- * somewhere in the type tree.
+ * somewhere in the type tree.  See the postcard documentation on backwards
+ * compatibility for more exhaustive advice.
  */
 #[derive(Serialize, Deserialize, PartialEq, Eq, Debug, Clone)]
 pub enum Token {

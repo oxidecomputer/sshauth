@@ -5,6 +5,8 @@ edition = "2021"
 license = "MIT OR Apache-2.0"
 description = "SSH key based (agents or static files) authentication tokens"
 keywords = ["ssh", "signature", "authentication", "ssh-agent"]
+repository = "https://github.com/oxidecomputer/sshauth.git"
+homepage = "https://github.com/oxidecomputer/sshauth"
 
 [lib]
 doctest = false

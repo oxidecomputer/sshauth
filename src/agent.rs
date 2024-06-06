@@ -91,137 +91,148 @@ impl PartialMessage {
             State::Error => {
                 bail!("protocol error");
             }
+            State::Message(_) => {
+                bail!("must call take() after add()");
+            }
             State::Rest => {
-                if self.buf.len() > 4 {
-                    self.state =
-                        State::Len(self.buf.get_u32().try_into().unwrap());
+                if self.buf.len() < 4 {
+                    /*
+                     * Wait for more bytes to arrive.
+                     */
+                    return Ok(());
                 }
+
+                self.state = State::Len(self.buf.get_u32().try_into().unwrap());
             }
             State::Len(len) => {
-                if self.buf.len() == len {
-                    /*
-                     * We have the whole message.
-                     */
-                    if len == 0 {
-                        self.state = State::Error;
-                        bail!("zero-length message");
-                    }
-                    match self.buf.get_u8() {
-                        SSH_AGENT_FAILURE => {
-                            self.state = State::Message(AgentMessage::Failure);
-                        }
-                        SSH_AGENT_SUCCESS => {
-                            self.state = State::Message(AgentMessage::Success);
-                        }
-                        SSH_AGENT_IDENTITIES_ANSWER => {
-                            if self.buf.remaining() < 4 {
-                                self.state = State::Error;
-                                bail!("identities answer too short");
-                            }
-                            let nkeys = self.buf.get_u32();
-                            let mut keys = Vec::new();
-                            for _ in 0..nkeys {
-                                /*
-                                 * Read the key blob length (u32):
-                                 */
-                                if self.buf.remaining() < 4 {
-                                    self.state = State::Error;
-                                    bail!("identities answer too short 2");
-                                }
-                                let keybloblen =
-                                    self.buf.get_u32().try_into().unwrap();
+                if len == 0 {
+                    self.state = State::Error;
+                    bail!("zero-length message");
+                }
 
-                                /*
-                                 * Read the key blob itself, and parse it as a
-                                 * public key:
-                                 */
-                                if self.buf.remaining() < keybloblen {
-                                    self.state = State::Error;
-                                    bail!("identities answer too short 3");
-                                }
-                                let mut key = ssh_key::PublicKey::from_bytes(
-                                    self.buf.get(0..keybloblen).unwrap(),
-                                )
-                                .unwrap();
-                                self.buf.advance(keybloblen);
-
-                                /*
-                                 * Read the length of the comment string (u32):
-                                 */
-                                if self.buf.remaining() < 4 {
-                                    self.state = State::Error;
-                                    bail!("identities answer too short 4");
-                                }
-                                let commlen =
-                                    self.buf.get_u32().try_into().unwrap();
-
-                                /*
-                                 * Read the comment itself:
-                                 */
-                                if self.buf.remaining() < commlen {
-                                    self.state = State::Error;
-                                    bail!("identities answer too short 5");
-                                }
-                                let s = String::from_utf8(
-                                    self.buf.get(0..commlen).unwrap().to_vec(),
-                                );
-                                self.buf.advance(commlen);
-
-                                if let Ok(s) = s {
-                                    /*
-                                     * Apply the comment to the key data we
-                                     * already parsed, and add it to the
-                                     * response list.
-                                     */
-                                    key.set_comment(s);
-                                    keys.push(key);
-                                } else {
-                                    self.state = State::Error;
-                                    bail!("comment string format wrong");
-                                }
-                            }
-                            self.state = State::Message(
-                                AgentMessage::IdentitiesAnswer(keys),
-                            );
-                        }
-                        SSH_AGENT_SIGN_RESPONSE => {
-                            if self.buf.remaining() < 4 {
-                                self.state = State::Error;
-                                bail!("signature answer too short");
-                            }
-                            let len = self.buf.get_u32().try_into().unwrap();
-                            if self.buf.remaining() != len {
-                                self.state = State::Error;
-                                bail!(
-                                    "wanted {} got {}",
-                                    len,
-                                    self.buf.remaining()
-                                );
-                            }
-
-                            let sig = Signature::decode(
-                                &mut self.buf.get(0..len).unwrap(),
-                            )?;
-                            self.buf.advance(len);
-
-                            self.state =
-                                State::Message(AgentMessage::SignResponse(sig));
-                        }
-                        n => {
-                            self.state = State::Error;
-                            bail!("unhandled message type {}", n);
-                        }
-                    }
-                } else if self.buf.len() > len {
+                if self.buf.len() > len {
                     /*
                      * We have too much message!
                      */
                     self.state = State::Error;
                     bail!("too much message (wanted {} bytes)", len);
                 }
-            }
-            State::Message(_) => {
-                bail!("message without take()");
+
+                if self.buf.len() < len {
+                    /*
+                     * Wait for more bytes to arrive.
+                     */
+                    return Ok(());
+                }
+
+                /*
+                 * We have the whole message.
+                 */
+                match self.buf.get_u8() {
+                    SSH_AGENT_FAILURE => {
+                        self.state = State::Message(AgentMessage::Failure);
+                    }
+                    SSH_AGENT_SUCCESS => {
+                        self.state = State::Message(AgentMessage::Success);
+                    }
+                    SSH_AGENT_IDENTITIES_ANSWER => {
+                        if self.buf.remaining() < 4 {
+                            self.state = State::Error;
+                            bail!("identities answer too short");
+                        }
+                        let nkeys = self.buf.get_u32();
+                        let mut keys = Vec::new();
+                        for _ in 0..nkeys {
+                            /*
+                             * Read the key blob length (u32):
+                             */
+                            if self.buf.remaining() < 4 {
+                                self.state = State::Error;
+                                bail!("identities answer too short 2");
+                            }
+                            let keybloblen =
+                                self.buf.get_u32().try_into().unwrap();
+
+                            /*
+                             * Read the key blob itself, and parse it as a
+                             * public key:
+                             */
+                            if self.buf.remaining() < keybloblen {
+                                self.state = State::Error;
+                                bail!("identities answer too short 3");
+                            }
+                            let mut key = ssh_key::PublicKey::from_bytes(
+                                self.buf.get(0..keybloblen).unwrap(),
+                            )
+                            .unwrap();
+                            self.buf.advance(keybloblen);
+
+                            /*
+                             * Read the length of the comment string (u32):
+                             */
+                            if self.buf.remaining() < 4 {
+                                self.state = State::Error;
+                                bail!("identities answer too short 4");
+                            }
+                            let commlen =
+                                self.buf.get_u32().try_into().unwrap();
+
+                            /*
+                             * Read the comment itself:
+                             */
+                            if self.buf.remaining() < commlen {
+                                self.state = State::Error;
+                                bail!("identities answer too short 5");
+                            }
+                            let s = String::from_utf8(
+                                self.buf.get(0..commlen).unwrap().to_vec(),
+                            );
+                            self.buf.advance(commlen);
+
+                            if let Ok(s) = s {
+                                /*
+                                 * Apply the comment to the key data we already
+                                 * parsed, and add it to the response list.
+                                 */
+                                key.set_comment(s);
+                                keys.push(key);
+                            } else {
+                                self.state = State::Error;
+                                bail!("comment string format wrong");
+                            }
+                        }
+                        self.state = State::Message(
+                            AgentMessage::IdentitiesAnswer(keys),
+                        );
+                    }
+                    SSH_AGENT_SIGN_RESPONSE => {
+                        if self.buf.remaining() < 4 {
+                            self.state = State::Error;
+                            bail!("signature answer too short");
+                        }
+                        let len = self.buf.get_u32().try_into().unwrap();
+                        if self.buf.remaining() != len {
+                            self.state = State::Error;
+                            bail!(
+                                "wanted {} got {}",
+                                len,
+                                self.buf.remaining()
+                            );
+                        }
+
+                        let sig = Signature::decode(
+                            &mut self.buf.get(0..len).unwrap(),
+                        )?;
+                        self.buf.advance(len);
+
+                        self.state =
+                            State::Message(AgentMessage::SignResponse(sig));
+                    }
+                    n => {
+                        self.state = State::Error;
+                        bail!("unhandled message type {}", n);
+                    }
+                }
             }
         }
 

@@ -109,6 +109,7 @@ impl TokenSigningBlobV1 {
      * bytes produced by pack() into the final token, which can then be encoded
      * and sent to the remote system.
      */
+    #[allow(clippy::wrong_self_convention)]
     pub(crate) fn into_token(&self, signature: TokenSignature) -> Token {
         Token::V1 { signed: self.transmitted.clone(), signature }
     }

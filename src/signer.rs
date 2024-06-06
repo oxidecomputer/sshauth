@@ -12,6 +12,7 @@ use crate::token::{
 };
 use crate::{agent, now_secs};
 
+#[allow(clippy::large_enum_variant)]
 enum TokenSignerMechanism {
     SshAgent {
         /**
@@ -275,7 +276,7 @@ impl TokenBuilder<'_> {
 
         let sig = match &self.signer.mech {
             TokenSignerMechanism::SshAgent { authsock, key } => {
-                agent::sign(&authsock, &key, &blob).await?
+                agent::sign(authsock, key, &blob).await?
             }
             TokenSignerMechanism::Key { privkey } => {
                 match privkey.algorithm() {

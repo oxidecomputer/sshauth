@@ -52,7 +52,7 @@ impl KeyDirectory {
                         {
                             bail!("line {n}: invalid key format");
                         }
-                        let buf = base64::decode(&t[1]).map_err(|e| {
+                        let buf = base64::decode(t[1]).map_err(|e| {
                             anyhow!("line {n}: decoding key: {e}")
                         })?;
                         let mut key = PublicKey::from_bytes(buf.as_slice())

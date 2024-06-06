@@ -36,7 +36,7 @@ where
          * Check for a comment-only or blank line.
          */
         let l = l.trim();
-        if l.starts_with("#") || l.is_empty() {
+        if l.starts_with('#') || l.is_empty() {
             continue;
         }
 

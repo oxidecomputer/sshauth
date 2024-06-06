@@ -6,6 +6,9 @@ license = "MIT OR Apache-2.0"
 description = "SSH key based (agents or static files) authentication tokens"
 keywords = ["ssh", "signature", "authentication", "ssh-agent"]
 
+[lib]
+doctest = false
+
 [dependencies]
 anyhow = "1"
 base64 = "0.13"

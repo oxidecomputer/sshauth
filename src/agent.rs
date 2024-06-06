@@ -11,32 +11,47 @@ use tokio::{
     net::UnixStream,
 };
 
+/*
+ * These constants are lifted from IETF "draft-miller-ssh-agent-14", which
+ * covers the SSH Agent Protocol:
+ */
+const SSH_AGENTC_REQUEST_IDENTITIES: u8 = 11;
+const SSH_AGENTC_SIGN_REQUEST: u8 = 13;
+const SSH_AGENT_FAILURE: u8 = 5;
+const SSH_AGENT_SUCCESS: u8 = 6;
+const SSH_AGENT_IDENTITIES_ANSWER: u8 = 12;
+const SSH_AGENT_SIGN_RESPONSE: u8 = 14;
+
 #[derive(Debug, Clone)]
-enum Message {
-    AgentFailure,
-    AgentSuccess,
-    AgentCRequestIdentities,
-    AgentIdentitiesAnswer(Vec<PublicKey>),
-    AgentCSignRequest(PublicKey, Vec<u8>),
-    AgentSignResponse(Signature),
+enum AgentMessage {
+    Failure,
+    Success,
+    IdentitiesAnswer(Vec<PublicKey>),
+    SignResponse(Signature),
 }
 
-impl Message {
+#[derive(Debug, Clone)]
+enum ClientMessage {
+    RequestIdentities,
+    SignRequest(PublicKey, Vec<u8>),
+}
+
+impl ClientMessage {
     fn pack(&self) -> BytesMut {
         let mut buf = BytesMut::new();
         match self {
-            Message::AgentCRequestIdentities => {
+            ClientMessage::RequestIdentities => {
                 buf.put_u32(1);
-                buf.put_u8(11);
+                buf.put_u8(SSH_AGENTC_REQUEST_IDENTITIES);
             }
-            Message::AgentCSignRequest(key, data) => {
+            ClientMessage::SignRequest(key, data) => {
                 /*
                  * Generate key blob...
                  */
                 let blob = key.to_bytes().unwrap();
                 let len = 1 + 4 + blob.len() + 4 + data.len() + 4;
                 buf.put_u32(len.try_into().unwrap());
-                buf.put_u8(13);
+                buf.put_u8(SSH_AGENTC_SIGN_REQUEST);
                 buf.put_u32(blob.len().try_into().unwrap());
                 for b in blob {
                     buf.put_u8(b);
@@ -47,7 +62,6 @@ impl Message {
                 }
                 buf.put_u32(0);
             }
-            _ => panic!("cannot pack {:?}", self),
         }
         buf
     }
@@ -56,7 +70,7 @@ impl Message {
 enum State {
     Rest,
     Len(usize),
-    Message(Message),
+    Message(AgentMessage),
     Error,
 }
 
@@ -93,13 +107,13 @@ impl PartialMessage {
                         bail!("zero-length message");
                     }
                     match self.buf.get_u8() {
-                        5 => {
-                            self.state = State::Message(Message::AgentFailure);
+                        SSH_AGENT_FAILURE => {
+                            self.state = State::Message(AgentMessage::Failure);
                         }
-                        6 => {
-                            self.state = State::Message(Message::AgentSuccess);
+                        SSH_AGENT_SUCCESS => {
+                            self.state = State::Message(AgentMessage::Success);
                         }
-                        12 => {
+                        SSH_AGENT_IDENTITIES_ANSWER => {
                             if self.buf.remaining() < 4 {
                                 self.state = State::Error;
                                 bail!("identities answer too short");
@@ -167,10 +181,10 @@ impl PartialMessage {
                                 }
                             }
                             self.state = State::Message(
-                                Message::AgentIdentitiesAnswer(keys),
+                                AgentMessage::IdentitiesAnswer(keys),
                             );
                         }
-                        14 => {
+                        SSH_AGENT_SIGN_RESPONSE => {
                             if self.buf.remaining() < 4 {
                                 self.state = State::Error;
                                 bail!("signature answer too short");
@@ -191,7 +205,7 @@ impl PartialMessage {
                             self.buf.advance(len);
 
                             self.state =
-                                State::Message(Message::AgentSignResponse(sig));
+                                State::Message(AgentMessage::SignResponse(sig));
                         }
                         n => {
                             self.state = State::Error;
@@ -214,7 +228,7 @@ impl PartialMessage {
         Ok(())
     }
 
-    fn take(&mut self) -> Option<Message> {
+    fn take(&mut self) -> Option<AgentMessage> {
         let m = match &self.state {
             State::Message(m) => m.clone(),
             _ => return None,
@@ -232,7 +246,7 @@ async fn connect(authsock: &str) -> Result<UnixStream> {
 pub async fn list_keys(authsock: &str) -> Result<Vec<PublicKey>> {
     let mut uds = connect(authsock).await?;
 
-    let buf = Message::AgentCRequestIdentities.pack();
+    let buf = ClientMessage::RequestIdentities.pack();
     uds.write_all(&buf).await?;
 
     let mut par = PartialMessage::new();
@@ -240,8 +254,8 @@ pub async fn list_keys(authsock: &str) -> Result<Vec<PublicKey>> {
         par.add(uds.read_u8().await?)?;
         if let Some(m) = par.take() {
             match m {
-                Message::AgentIdentitiesAnswer(keys) => return Ok(keys),
-                o => bail!("WRONG MSG: {:?}", o),
+                AgentMessage::IdentitiesAnswer(keys) => return Ok(keys),
+                o => bail!("unexpected reply from SSH agent: {o:?}"),
             }
         }
     }
@@ -254,7 +268,7 @@ pub async fn sign(
 ) -> Result<Signature> {
     let mut uds = connect(authsock).await?;
 
-    let buf = Message::AgentCSignRequest(key.clone(), data.to_vec()).pack();
+    let buf = ClientMessage::SignRequest(key.clone(), data.to_vec()).pack();
     uds.write_all(&buf).await?;
 
     let mut par = PartialMessage::new();
@@ -262,12 +276,8 @@ pub async fn sign(
         par.add(uds.read_u8().await?)?;
         if let Some(m) = par.take() {
             match m {
-                Message::AgentSignResponse(sig) => {
-                    return Ok(sig);
-                }
-                o => {
-                    bail!("WRONG MSG: {:?}", o);
-                }
+                AgentMessage::SignResponse(sig) => return Ok(sig),
+                o => bail!("unexpected reply from SSH agent: {o:?}"),
             }
         }
     }

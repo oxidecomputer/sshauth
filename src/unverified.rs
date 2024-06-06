@@ -165,15 +165,6 @@ impl UnverifiedTokenVerification {
 
         let sig = Signature::try_from(&self.signature)?;
 
-        /*
-         * Confirm that the timestamp is within the window we are
-         * prepared to accept.
-         */
-        let delta = now_secs().abs_diff(self.blob.transmitted.timestamp);
-        if delta > self.max_skew_seconds {
-            bail!("delta of {} seconds is too great", delta);
-        }
-
         for key in keys.into_iter() {
             let key = key.borrow();
 
@@ -196,6 +187,9 @@ impl UnverifiedTokenVerification {
             };
 
             if !verified {
+                /*
+                 * Try the next key.
+                 */
                 continue;
             }
 
@@ -207,12 +201,21 @@ impl UnverifiedTokenVerification {
                  * validate the request.
                  */
                 if fingerprint != received_fp {
-                    continue;
+                    bail!("fingerprint mismatch");
                 }
             }
 
+            /*
+             * Confirm that the timestamp is within the window we are
+             * prepared to accept.
+             */
+            let delta = now_secs().abs_diff(self.blob.transmitted.timestamp);
+            if delta > self.max_skew_seconds {
+                bail!("delta of {} seconds is too great", delta);
+            }
+
             return Ok(VerifiedToken {
-                fingerprint: key.fingerprint(ssh_key::HashAlg::Sha256),
+                fingerprint,
                 identity: self.blob.transmitted.identity.clone(),
             });
         }

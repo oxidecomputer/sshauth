@@ -22,8 +22,8 @@ postcard = { version = "1", features = ["use-std"] }
 serde = { version = "1", features = ["derive"] }
 sha2 = "0.10.8"
 slog = "2.7"
-ssh-encoding = "0.2"
-ssh-key = { version = "0.6.4", features = ["p256", "ed25519"] }
+ssh-encoding = { git = "https://github.com/oxidecomputer/SSH",  rev = "862fc7a1ffaf65390a1f759556d57bc6bee001fa" }
+ssh-key = { git = "https://github.com/oxidecomputer/SSH",  rev = "862fc7a1ffaf65390a1f759556d57bc6bee001fa", features = ["p256", "ed25519"] }
 tokio = { version = "1", features = ["io-util", "net"] }
 
 [dev-dependencies]

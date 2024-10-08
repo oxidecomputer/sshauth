@@ -809,8 +809,7 @@ dependencies = [
 [[package]]
 name = "ssh-cipher"
 version = "0.2.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "caac132742f0d33c3af65bfcde7f6aa8f62f0e991d80db99149eb9d44708784f"
+source = "git+https://github.com/oxidecomputer/SSH?rev=862fc7a1ffaf65390a1f759556d57bc6bee001fa#862fc7a1ffaf65390a1f759556d57bc6bee001fa"
 dependencies = [
  "cipher",
  "ssh-encoding",
@@ -819,8 +818,7 @@ dependencies = [
 [[package]]
 name = "ssh-encoding"
 version = "0.2.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "eb9242b9ef4108a78e8cd1a2c98e193ef372437f8c22be363075233321dd4a15"
+source = "git+https://github.com/oxidecomputer/SSH?rev=862fc7a1ffaf65390a1f759556d57bc6bee001fa#862fc7a1ffaf65390a1f759556d57bc6bee001fa"
 dependencies = [
  "base64ct",
  "pem-rfc7468",
@@ -830,8 +828,7 @@ dependencies = [
 [[package]]
 name = "ssh-key"
 version = "0.6.6"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "ca9b366a80cf18bb6406f4cf4d10aebfb46140a8c0c33f666a144c5c76ecbafc"
+source = "git+https://github.com/oxidecomputer/SSH?rev=862fc7a1ffaf65390a1f759556d57bc6bee001fa#862fc7a1ffaf65390a1f759556d57bc6bee001fa"
 dependencies = [
  "ed25519-dalek",
  "p256",

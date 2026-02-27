@@ -290,6 +290,7 @@ pub enum TokenSignatureAlgorithm {
     Ecdsa256,
     Ed25519,
     SkEd25519,
+    SkEcdsaSha2NistP256,
 }
 
 impl TryFrom<Signature> for TokenSignature {
@@ -309,6 +310,10 @@ impl TryFrom<Signature> for TokenSignature {
             }),
             ssh_key::Algorithm::SkEd25519 => Ok(TokenSignature {
                 algorithm: TokenSignatureAlgorithm::SkEd25519,
+                data: s.as_bytes().to_vec(),
+            }),
+            ssh_key::Algorithm::SkEcdsaSha2NistP256 => Ok(TokenSignature {
+                algorithm: TokenSignatureAlgorithm::SkEcdsaSha2NistP256,
                 data: s.as_bytes().to_vec(),
             }),
             other => bail!("unsupported signature algorithm {other}"),
@@ -333,6 +338,10 @@ impl TryFrom<&TokenSignature> for Signature {
             TokenSignatureAlgorithm::SkEd25519 => {
                 Signature::new(ssh_key::Algorithm::SkEd25519, ts.data.clone())?
             }
+            TokenSignatureAlgorithm::SkEcdsaSha2NistP256 => Signature::new(
+                ssh_key::Algorithm::SkEcdsaSha2NistP256,
+                ts.data.clone(),
+            )?,
         })
     }
 }

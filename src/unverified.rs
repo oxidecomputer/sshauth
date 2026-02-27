@@ -186,6 +186,9 @@ impl UnverifiedTokenVerification {
                 ssh_key::public::KeyData::SkEd25519(pk) => {
                     pk.verify(&blob, &sig).is_ok()
                 }
+                ssh_key::public::KeyData::SkEcdsaSha2NistP256(pk) => {
+                    pk.verify(&blob, &sig).is_ok()
+                }
                 _ => bail!("unsupported key type {}", key.algorithm()),
             };
 

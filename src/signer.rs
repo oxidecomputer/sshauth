@@ -84,7 +84,7 @@ impl TokenSigner {
         match privkey.algorithm() {
             Algorithm::Ecdsa { curve: EcdsaCurve::NistP256 }
             | Algorithm::Ed25519 => (),
-            Algorithm::SkEd25519 => {
+            Algorithm::SkEd25519 | Algorithm::SkEcdsaSha2NistP256 => {
                 // this should never happen but lets be prepared
                 bail!(
                     "key algorithm {} requires a hardware token \
@@ -300,7 +300,7 @@ impl TokenBuilder<'_> {
                     | Algorithm::Ed25519 => {
                         privkey.key_data().try_sign(&blob)?
                     }
-                    Algorithm::SkEd25519 => {
+                    Algorithm::SkEd25519 | Algorithm::SkEcdsaSha2NistP256 => {
                         // this should never happen but lets be prepared
                         bail!(
                             "key algorithm {} requires a hardware token \

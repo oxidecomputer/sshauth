@@ -306,7 +306,7 @@ impl TryFrom<Signature> for TokenSignature {
                 algorithm: TokenSignatureAlgorithm::Ed25519,
                 data: s.as_bytes().to_vec(),
             }),
-            _ => bail!("unsupported signature algorithm"),
+            other => bail!("unsupported signature algorithm {other}"),
         }
     }
 }

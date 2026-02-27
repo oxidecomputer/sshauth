@@ -297,7 +297,7 @@ impl TokenBuilder<'_> {
                          * This should not happen, because the builder restricts
                          * the key algorithms we are willing to accept.
                          */
-                        bail!("unsupported key algorithm");
+                        bail!("unsupported key algorithm {}", privkey.algorithm());
                     }
                 }
             }

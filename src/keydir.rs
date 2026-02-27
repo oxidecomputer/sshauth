@@ -49,7 +49,8 @@ impl KeyDirectory {
                         let t = l.split_whitespace().collect::<Vec<_>>();
                         if t.len() < 2
                             || (t[0] != "ecdsa-sha2-nistp256"
-                                && t[0] != "ssh-ed25519")
+                                && t[0] != "ssh-ed25519"
+                                && t[0] != "sk-ssh-ed25519@openssh.com")
                         {
                             bail!("line {n}: invalid key format");
                         }

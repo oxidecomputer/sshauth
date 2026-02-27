@@ -84,6 +84,14 @@ impl TokenSigner {
         match privkey.algorithm() {
             Algorithm::Ecdsa { curve: EcdsaCurve::NistP256 }
             | Algorithm::Ed25519 => (),
+            Algorithm::SkEd25519 => {
+                // this should never happen but lets be prepared
+                bail!(
+                    "key algorithm {} requires a hardware token \
+                    and cannot sign directly; use an SSH agent",
+                    privkey.algorithm(),
+                );
+            }
             _ => {
                 bail!("unsupported SSH key algorithm: {}", privkey.algorithm())
             }
@@ -292,12 +300,23 @@ impl TokenBuilder<'_> {
                     | Algorithm::Ed25519 => {
                         privkey.key_data().try_sign(&blob)?
                     }
+                    Algorithm::SkEd25519 => {
+                        // this should never happen but lets be prepared
+                        bail!(
+                            "key algorithm {} requires a hardware token \
+                            and cannot sign directly; use an SSH agent",
+                            privkey.algorithm(),
+                        );
+                    }
                     _ => {
                         /*
                          * This should not happen, because the builder restricts
                          * the key algorithms we are willing to accept.
                          */
-                        bail!("unsupported key algorithm {}", privkey.algorithm());
+                        bail!(
+                            "unsupported key algorithm {}",
+                            privkey.algorithm()
+                        );
                     }
                 }
             }

@@ -872,6 +872,7 @@ dependencies = [
  "ssh-encoding",
  "ssh-key",
  "tokio",
+ "windows-sys",
 ]
 
 [[package]]

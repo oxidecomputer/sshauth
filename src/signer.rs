@@ -84,6 +84,13 @@ impl TokenSigner {
         match privkey.algorithm() {
             Algorithm::Ecdsa { curve: EcdsaCurve::NistP256 }
             | Algorithm::Ed25519 => (),
+            Algorithm::SkEd25519 | Algorithm::SkEcdsaSha2NistP256 => {
+                bail!(
+                    "key algorithm {} requires a hardware token \
+                    and cannot sign directly; use an SSH agent",
+                    privkey.algorithm(),
+                );
+            }
             _ => {
                 bail!("unsupported SSH key algorithm: {}", privkey.algorithm())
             }

@@ -6,10 +6,21 @@ use anyhow::{bail, Result};
 use bytes::{Buf, BufMut, BytesMut};
 use ssh_encoding::Decode;
 use ssh_key::{PublicKey, Signature};
-use tokio::{
-    io::{AsyncReadExt, AsyncWriteExt},
-    net::UnixStream,
-};
+#[cfg(windows)]
+use std::time::Duration;
+use tokio::io::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt};
+#[cfg(windows)]
+use tokio::net::windows::named_pipe::ClientOptions;
+#[cfg(unix)]
+use tokio::net::UnixStream;
+#[cfg(windows)]
+use tokio::time::Instant;
+#[cfg(windows)]
+use windows_sys::Win32::Foundation::ERROR_PIPE_BUSY;
+
+/// Timeout when connecting to named pipe
+#[cfg(windows)]
+const PIPE_CONNECT_TIMEOUT: Duration = Duration::from_secs(2);
 
 /*
  * These constants are lifted from IETF "draft-miller-ssh-agent-14", which
@@ -250,19 +261,42 @@ impl PartialMessage {
     }
 }
 
-async fn connect(authsock: &str) -> Result<UnixStream> {
+#[cfg(unix)]
+async fn connect(
+    authsock: &str,
+) -> Result<impl AsyncRead + AsyncWrite + 'static> {
     Ok(UnixStream::connect(authsock).await?)
 }
 
+#[cfg(windows)]
+async fn connect(
+    authsock: &str,
+) -> Result<impl AsyncRead + AsyncWrite + 'static> {
+    let instant = Instant::now();
+
+    loop {
+        let result = ClientOptions::new().open(authsock);
+
+        if result.as_ref().is_err_and(|err| {
+            err.raw_os_error() == Some(ERROR_PIPE_BUSY as i32)
+                && instant.elapsed() < PIPE_CONNECT_TIMEOUT
+        }) {
+            tokio::time::sleep(Duration::from_millis(50)).await;
+        } else {
+            break Ok(result?);
+        }
+    }
+}
+
 pub async fn list_keys(authsock: &str) -> Result<Vec<PublicKey>> {
-    let mut uds = connect(authsock).await?;
+    let mut stream = connect(authsock).await?;
 
     let buf = ClientMessage::RequestIdentities.pack();
-    uds.write_all(&buf).await?;
+    stream.write_all(&buf).await?;
 
     let mut par = PartialMessage::new();
     loop {
-        par.add(uds.read_u8().await?)?;
+        par.add(stream.read_u8().await?)?;
         if let Some(m) = par.take() {
             match m {
                 AgentMessage::IdentitiesAnswer(keys) => return Ok(keys),
@@ -300,7 +334,7 @@ mod test {
 
     #[tokio::test]
     async fn listing_keys() {
-        let authsock = std::env::var("SSH_AUTH_SOCK").expect("SSH_AUTH_SOCK");
+        let authsock = authsock();
 
         let keys = list_keys(&authsock).await.unwrap();
 
@@ -319,7 +353,7 @@ mod test {
 
     #[tokio::test]
     async fn signing_something() {
-        let authsock = std::env::var("SSH_AUTH_SOCK").expect("SSH_AUTH_SOCK");
+        let authsock = authsock();
 
         let keys = list_keys(&authsock).await.unwrap();
 
@@ -350,5 +384,17 @@ mod test {
         println!("and back = {bsig:?}");
 
         assert_eq!(sig, bsig);
+    }
+
+    fn authsock() -> String {
+        #[cfg(unix)]
+        {
+            std::env::var("SSH_AUTH_SOCK").expect("SSH_AUTH_SOCK")
+        }
+
+        #[cfg(windows)]
+        {
+            r#"\\.\pipe\openssh-ssh-agent"#.to_owned()
+        }
     }
 }

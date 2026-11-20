@@ -286,7 +286,7 @@ pub struct TokenSignature {
 }
 
 #[derive(Serialize, Deserialize, PartialEq, Eq, Debug, Clone, Copy)]
-pub enum TokenSignatureAlgorithm {
+pub(crate) enum TokenSignatureAlgorithm {
     Ecdsa256,
     Ed25519,
     SkEd25519,

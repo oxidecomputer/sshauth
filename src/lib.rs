@@ -135,40 +135,39 @@ mod test {
         Ok(TestKey { id, pubkey_str, privkey_str, pubkey, privkey })
     }
 
-    fn load_keys_ecdsa256() -> Result<Vec<TestKey>> {
-        [
-            (
-                "ecdsa256-test-1",
-                include_str!("../testdata/keys/ecdsa256/test-1"),
-                include_str!("../testdata/keys/ecdsa256/test-1.pub"),
-            ),
-            (
-                "ecdsa256-test-2",
-                include_str!("../testdata/keys/ecdsa256/test-2"),
-                include_str!("../testdata/keys/ecdsa256/test-2.pub"),
-            ),
-        ]
-        .into_iter()
-        .map(load_key)
-        .collect::<Result<Vec<_>>>()
+    /*
+     * include_str!() only takes a literal, so the paths of the test keys are
+     * built by a macro rather than a function.
+     */
+    macro_rules! load_keys {
+        ($dir:literal) => {
+            [
+                (
+                    concat!($dir, "-test-1"),
+                    include_str!(concat!("../testdata/keys/", $dir, "/test-1")),
+                    include_str!(concat!(
+                        "../testdata/keys/",
+                        $dir,
+                        "/test-1.pub"
+                    )),
+                ),
+                (
+                    concat!($dir, "-test-2"),
+                    include_str!(concat!("../testdata/keys/", $dir, "/test-2")),
+                    include_str!(concat!(
+                        "../testdata/keys/",
+                        $dir,
+                        "/test-2.pub"
+                    )),
+                ),
+            ]
+            .into_iter()
+            .map(load_key)
+        };
     }
 
-    fn load_keys_ed25519() -> Result<Vec<TestKey>> {
-        [
-            (
-                "ed25519-test-1",
-                include_str!("../testdata/keys/ed25519/test-1"),
-                include_str!("../testdata/keys/ed25519/test-1.pub"),
-            ),
-            (
-                "ed25519-test-2",
-                include_str!("../testdata/keys/ed25519/test-2"),
-                include_str!("../testdata/keys/ed25519/test-2.pub"),
-            ),
-        ]
-        .into_iter()
-        .map(load_key)
-        .collect::<Result<Vec<_>>>()
+    fn load_all_keys() -> Result<Vec<TestKey>> {
+        load_keys!("ecdsa256").chain(load_keys!("ed25519")).collect()
     }
 
     #[test]
@@ -197,10 +196,7 @@ mod test {
     async fn file_signing() -> Result<()> {
         println!();
 
-        let inputs = load_keys_ecdsa256()?
-            .into_iter()
-            .chain(load_keys_ed25519()?.into_iter())
-            .collect::<Vec<_>>();
+        let inputs = load_all_keys()?;
         for (itk, tk) in inputs.iter().enumerate() {
             let ts = TokenSigner::using_private_key(tk.privkey.clone())?
                 .magic_prefix(*b"abcdefgh")
@@ -245,10 +241,7 @@ mod test {
     async fn old_sigs() -> Result<()> {
         println!();
 
-        let inputs = load_keys_ecdsa256()?
-            .into_iter()
-            .chain(load_keys_ed25519()?.into_iter())
-            .collect::<Vec<_>>();
+        let inputs = load_all_keys()?;
 
         let sigs = include_str!("../testdata/sigs.txt")
             .lines()

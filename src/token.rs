@@ -293,31 +293,43 @@ pub enum TokenSignatureAlgorithm {
     SkEcdsaSha2NistP256,
 }
 
+impl TokenSignatureAlgorithm {
+    pub(crate) fn from_ssh(algorithm: &ssh_key::Algorithm) -> Result<Self> {
+        Ok(match algorithm {
+            ssh_key::Algorithm::Ecdsa {
+                curve: ssh_key::EcdsaCurve::NistP256,
+            } => TokenSignatureAlgorithm::Ecdsa256,
+            ssh_key::Algorithm::Ed25519 => TokenSignatureAlgorithm::Ed25519,
+            ssh_key::Algorithm::SkEd25519 => TokenSignatureAlgorithm::SkEd25519,
+            ssh_key::Algorithm::SkEcdsaSha2NistP256 => {
+                TokenSignatureAlgorithm::SkEcdsaSha2NistP256
+            }
+            other => bail!("unsupported signature algorithm: {other}"),
+        })
+    }
+
+    pub(crate) fn to_ssh(self) -> ssh_key::Algorithm {
+        match self {
+            TokenSignatureAlgorithm::Ecdsa256 => ssh_key::Algorithm::Ecdsa {
+                curve: ssh_key::EcdsaCurve::NistP256,
+            },
+            TokenSignatureAlgorithm::Ed25519 => ssh_key::Algorithm::Ed25519,
+            TokenSignatureAlgorithm::SkEd25519 => ssh_key::Algorithm::SkEd25519,
+            TokenSignatureAlgorithm::SkEcdsaSha2NistP256 => {
+                ssh_key::Algorithm::SkEcdsaSha2NistP256
+            }
+        }
+    }
+}
+
 impl TryFrom<Signature> for TokenSignature {
     type Error = anyhow::Error;
 
     fn try_from(s: Signature) -> Result<Self> {
-        match s.algorithm() {
-            ssh_key::Algorithm::Ecdsa {
-                curve: ssh_key::EcdsaCurve::NistP256,
-            } => Ok(TokenSignature {
-                algorithm: TokenSignatureAlgorithm::Ecdsa256,
-                data: s.as_bytes().to_vec(),
-            }),
-            ssh_key::Algorithm::Ed25519 => Ok(TokenSignature {
-                algorithm: TokenSignatureAlgorithm::Ed25519,
-                data: s.as_bytes().to_vec(),
-            }),
-            ssh_key::Algorithm::SkEd25519 => Ok(TokenSignature {
-                algorithm: TokenSignatureAlgorithm::SkEd25519,
-                data: s.as_bytes().to_vec(),
-            }),
-            ssh_key::Algorithm::SkEcdsaSha2NistP256 => Ok(TokenSignature {
-                algorithm: TokenSignatureAlgorithm::SkEcdsaSha2NistP256,
-                data: s.as_bytes().to_vec(),
-            }),
-            other => bail!("unsupported signature algorithm: {other}"),
-        }
+        Ok(TokenSignature {
+            algorithm: TokenSignatureAlgorithm::from_ssh(&s.algorithm())?,
+            data: s.as_bytes().to_vec(),
+        })
     }
 }
 
@@ -325,24 +337,7 @@ impl TryFrom<&TokenSignature> for Signature {
     type Error = anyhow::Error;
 
     fn try_from(ts: &TokenSignature) -> Result<Self> {
-        Ok(match ts.algorithm {
-            TokenSignatureAlgorithm::Ecdsa256 => Signature::new(
-                ssh_key::Algorithm::Ecdsa {
-                    curve: ssh_key::EcdsaCurve::NistP256,
-                },
-                ts.data.clone(),
-            )?,
-            TokenSignatureAlgorithm::Ed25519 => {
-                Signature::new(ssh_key::Algorithm::Ed25519, ts.data.clone())?
-            }
-            TokenSignatureAlgorithm::SkEd25519 => {
-                Signature::new(ssh_key::Algorithm::SkEd25519, ts.data.clone())?
-            }
-            TokenSignatureAlgorithm::SkEcdsaSha2NistP256 => Signature::new(
-                ssh_key::Algorithm::SkEcdsaSha2NistP256,
-                ts.data.clone(),
-            )?,
-        })
+        Ok(Signature::new(ts.algorithm.to_ssh(), ts.data.clone())?)
     }
 }
 
@@ -659,6 +654,54 @@ mod test {
                 .expect(&format!("decoded {i} {:?}", s.name));
 
             assert_eq!(t, dec, "roundtrip mismatch on {i} {:?}", s.name);
+        }
+    }
+
+    /*
+     * Every TokenSignatureAlgorithm variant with the index that postcard
+     * encodes it as.
+     */
+    const SIGNATURE_ALGORITHMS: [(TokenSignatureAlgorithm, u8); 4] = [
+        (TokenSignatureAlgorithm::Ecdsa256, 0),
+        (TokenSignatureAlgorithm::Ed25519, 1),
+        (TokenSignatureAlgorithm::SkEd25519, 2),
+        (TokenSignatureAlgorithm::SkEcdsaSha2NistP256, 3),
+    ];
+
+    #[test]
+    fn signature_algorithm_encoding() {
+        /*
+         * Tokens contain the postcard encoding of TokenSignatureAlgorithm,
+         * which is the index of the variant.  Check the encoding of every
+         * variant, so that reordering the variants fails here instead of
+         * changing the algorithm of existing tokens.  Also check that the
+         * index after the last variant doesn't decode, so that a new variant
+         * must be added to SIGNATURE_ALGORITHMS.
+         */
+        for (algorithm, index) in SIGNATURE_ALGORITHMS {
+            assert_eq!(
+                postcard::to_stdvec(&algorithm).unwrap(),
+                [index],
+                "{algorithm:?}"
+            );
+        }
+        assert!(postcard::from_bytes::<TokenSignatureAlgorithm>(&[
+            SIGNATURE_ALGORITHMS.len() as u8
+        ])
+        .is_err());
+    }
+
+    #[test]
+    fn signature_algorithm_mapping() {
+        /*
+         * Every token signature algorithm must map to an SSH algorithm and
+         * back to itself, or tokens would claim the wrong algorithm.
+         */
+        for (algorithm, _) in SIGNATURE_ALGORITHMS {
+            assert_eq!(
+                TokenSignatureAlgorithm::from_ssh(&algorithm.to_ssh()).unwrap(),
+                algorithm
+            );
         }
     }
 

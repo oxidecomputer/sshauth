@@ -4,6 +4,8 @@
 
 use std::time::{SystemTime, UNIX_EPOCH};
 
+use ssh_key::Algorithm;
+
 const MAGIC_PREFIX_DEFAULT: [u8; 8] = *b"byo.e.m.";
 
 const MAGIC_SUPER_PREFIX: [u8; 6] = *b"oxauth";
@@ -20,7 +22,19 @@ pub use signer::TokenSigner;
 pub use ssh_key::{PrivateKey, PublicKey};
 pub use unverified::UnverifiedToken;
 
-use token::TokenIdentity;
+use token::{TokenIdentity, TokenSignatureAlgorithm};
+
+/**
+ * Returns whether tokens can be signed and verified with keys of the given
+ * algorithm.  Keys of the FIDO security key algorithms
+ * (sk-ssh-ed25519@openssh.com and sk-ecdsa-sha2-nistp256@openssh.com) can
+ * only sign through an SSH agent.  Consumers can use this to reject keys that
+ * can never verify a token when the keys are configured, rather than when a
+ * token fails to verify.
+ */
+pub fn is_supported_algorithm(algorithm: &Algorithm) -> bool {
+    TokenSignatureAlgorithm::from_ssh(algorithm).is_ok()
+}
 
 fn now_secs() -> u64 {
     SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_secs()
@@ -78,6 +92,7 @@ impl std::fmt::Display for VerifiedToken {
 mod test {
     use crate::*;
     use anyhow::{bail, Result};
+    use ssh_key::EcdsaCurve;
 
     #[allow(unused)]
     struct TestKey {
@@ -120,50 +135,73 @@ mod test {
         Ok(TestKey { id, pubkey_str, privkey_str, pubkey, privkey })
     }
 
-    fn load_keys_ecdsa256() -> Result<Vec<TestKey>> {
-        [
-            (
-                "ecdsa256-test-1",
-                include_str!("../testdata/keys/ecdsa256/test-1"),
-                include_str!("../testdata/keys/ecdsa256/test-1.pub"),
-            ),
-            (
-                "ecdsa256-test-2",
-                include_str!("../testdata/keys/ecdsa256/test-2"),
-                include_str!("../testdata/keys/ecdsa256/test-2.pub"),
-            ),
-        ]
-        .into_iter()
-        .map(load_key)
-        .collect::<Result<Vec<_>>>()
+    /*
+     * include_str!() only takes a literal, so the paths of the test keys are
+     * built by a macro rather than a function.
+     */
+    macro_rules! load_keys {
+        ($dir:literal) => {
+            [
+                (
+                    concat!($dir, "-test-1"),
+                    include_str!(concat!("../testdata/keys/", $dir, "/test-1")),
+                    include_str!(concat!(
+                        "../testdata/keys/",
+                        $dir,
+                        "/test-1.pub"
+                    )),
+                ),
+                (
+                    concat!($dir, "-test-2"),
+                    include_str!(concat!("../testdata/keys/", $dir, "/test-2")),
+                    include_str!(concat!(
+                        "../testdata/keys/",
+                        $dir,
+                        "/test-2.pub"
+                    )),
+                ),
+            ]
+            .into_iter()
+            .map(load_key)
+        };
     }
 
-    fn load_keys_ed25519() -> Result<Vec<TestKey>> {
-        [
-            (
-                "ed25519-test-1",
-                include_str!("../testdata/keys/ed25519/test-1"),
-                include_str!("../testdata/keys/ed25519/test-1.pub"),
-            ),
-            (
-                "ed25519-test-2",
-                include_str!("../testdata/keys/ed25519/test-2"),
-                include_str!("../testdata/keys/ed25519/test-2.pub"),
-            ),
-        ]
-        .into_iter()
-        .map(load_key)
-        .collect::<Result<Vec<_>>>()
+    fn load_all_keys() -> Result<Vec<TestKey>> {
+        load_keys!("ecdsa256")
+            .chain(load_keys!("ecdsa384"))
+            .chain(load_keys!("ed25519"))
+            .collect()
+    }
+
+    #[test]
+    fn supported_algorithms() {
+        /*
+         * Check is_supported_algorithm() against a list of the algorithms
+         * that tokens can and can't carry a signature of.
+         */
+        for (algorithm, supported) in [
+            (Algorithm::Ecdsa { curve: EcdsaCurve::NistP256 }, true),
+            (Algorithm::Ecdsa { curve: EcdsaCurve::NistP384 }, true),
+            (Algorithm::Ecdsa { curve: EcdsaCurve::NistP521 }, false),
+            (Algorithm::Ed25519, true),
+            (Algorithm::SkEd25519, true),
+            (Algorithm::SkEcdsaSha2NistP256, true),
+            (Algorithm::Rsa { hash: None }, false),
+            (Algorithm::Dsa, false),
+        ] {
+            assert_eq!(
+                is_supported_algorithm(&algorithm),
+                supported,
+                "{algorithm}"
+            );
+        }
     }
 
     #[tokio::test]
     async fn file_signing() -> Result<()> {
         println!();
 
-        let inputs = load_keys_ecdsa256()?
-            .into_iter()
-            .chain(load_keys_ed25519()?.into_iter())
-            .collect::<Vec<_>>();
+        let inputs = load_all_keys()?;
         for (itk, tk) in inputs.iter().enumerate() {
             let ts = TokenSigner::using_private_key(tk.privkey.clone())?
                 .magic_prefix(*b"abcdefgh")
@@ -204,14 +242,149 @@ mod test {
         Ok(())
     }
 
+    /**
+     * An ssh-agent that a test started.  Dropping it kills the agent and
+     * removes its directory, also when the test panics.
+     */
+    struct TestAgent {
+        child: std::process::Child,
+        dir: std::path::PathBuf,
+        sock: std::path::PathBuf,
+    }
+
+    impl Drop for TestAgent {
+        fn drop(&mut self) {
+            let _ = self.child.kill();
+            let _ = self.child.wait();
+            let _ = std::fs::remove_dir_all(&self.dir);
+        }
+    }
+
+    impl TestAgent {
+        /**
+         * Starts an ssh-agent with a socket in a new directory.  Returns None
+         * when ssh-agent isn't installed.
+         */
+        async fn start() -> Result<Option<TestAgent>> {
+            use std::os::unix::fs::DirBuilderExt;
+            use std::process::{Command, Stdio};
+
+            /*
+             * A test run that was killed can leave its directory behind.
+             * Remove it, and create the directory so that it fails if it
+             * still exists, for example because another user created it.
+             */
+            let dir = std::env::temp_dir()
+                .join(format!("sshauth-agent-test-{}", std::process::id()));
+            let _ = std::fs::remove_dir_all(&dir);
+            std::fs::DirBuilder::new().mode(0o700).create(&dir)?;
+            let sock = dir.join("agent.sock");
+            let child = match Command::new("ssh-agent")
+                .arg("-D")
+                .arg("-a")
+                .arg(&sock)
+                .stdout(Stdio::null())
+                .spawn()
+            {
+                Ok(child) => child,
+                Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
+                    std::fs::remove_dir(&dir)?;
+                    return Ok(None);
+                }
+                Err(e) => return Err(e.into()),
+            };
+            let mut agent = TestAgent { child, dir, sock };
+
+            /*
+             * ssh-agent creates the socket file before it listens on it, and
+             * exits if it can't, for example when the path is too long for a
+             * socket.  Wait until a connection succeeds.
+             */
+            for _ in 0..500 {
+                if std::os::unix::net::UnixStream::connect(&agent.sock).is_ok()
+                {
+                    return Ok(Some(agent));
+                }
+                if let Some(status) = agent.child.try_wait()? {
+                    bail!("ssh-agent exited with {status}");
+                }
+                tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+            }
+            bail!("can't connect to ssh-agent at {:?}", agent.sock);
+        }
+
+        fn add(&self, privkey: &str) -> std::io::Result<()> {
+            use std::io::Write;
+            use std::process::{Command, Stdio};
+
+            let mut ssh_add = Command::new("ssh-add")
+                .arg("-q")
+                .arg("-")
+                .env("SSH_AUTH_SOCK", &self.sock)
+                .stdin(Stdio::piped())
+                .spawn()?;
+            let res =
+                ssh_add.stdin.take().unwrap().write_all(privkey.as_bytes());
+            let status = ssh_add.wait()?;
+            /*
+             * When ssh-add exits early, writing the key fails with EPIPE.
+             * Its exit status says more about why.
+             */
+            if !status.success() {
+                return Err(std::io::Error::other(format!(
+                    "ssh-add exited with {status}"
+                )));
+            }
+            res
+        }
+    }
+
+    #[tokio::test]
+    async fn agent_signing() -> Result<()> {
+        /*
+         * Tokens signed through an SSH agent must verify with the public key
+         * of the signing key.  Start an ssh-agent, add every test key to it,
+         * and sign and verify a token with each key through the agent.  Skip
+         * the test when OpenSSH isn't installed.
+         */
+        let Some(agent) = TestAgent::start().await? else {
+            println!("skipping, ssh-agent is not installed");
+            return Ok(());
+        };
+        let authsock = agent.sock.to_str().unwrap();
+
+        for tk in load_all_keys()? {
+            match agent.add(tk.privkey_str) {
+                Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
+                    println!("skipping, ssh-add is not installed");
+                    return Ok(());
+                }
+                res => res?,
+            }
+
+            let ts = TokenSigner::using_authsock(authsock)?
+                .key(tk.pubkey.clone())
+                .magic_prefix(*b"abcdefgh")
+                .identity_filename(tk.id)
+                .build()?;
+            let tok = ts.sign_for().action("a", "b").sign().await?.encode();
+
+            UnverifiedToken::try_from(tok.as_str())?
+                .verify_for()
+                .magic_prefix(*b"abcdefgh")
+                .action("a", "b")
+                .with_key(&tk.pubkey)?;
+            println!("   agent signed and verified with {}", tk.id);
+        }
+
+        Ok(())
+    }
+
     #[tokio::test]
     async fn old_sigs() -> Result<()> {
         println!();
 
-        let inputs = load_keys_ecdsa256()?
-            .into_iter()
-            .chain(load_keys_ed25519()?.into_iter())
-            .collect::<Vec<_>>();
+        let inputs = load_all_keys()?;
 
         let sigs = include_str!("../testdata/sigs.txt")
             .lines()

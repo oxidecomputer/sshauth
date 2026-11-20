@@ -130,16 +130,24 @@ system:
 
 * The `keyfile::parse_authorized_keys()` routine will parse an OpenSSH
   `authorized_keys` file and return a list of public keys from that file.
-* The `keydir::KeyDirectory` object builds on this to perform a lookup in
-  a nominated directory, using the _identity file name_ that may be provided
-  in a token.  That file name will be used to load a file from the key
-  directory, and the token is considered valid if any of the public keys
-  in that file allow a successful verification.
+* The `keydir::KeyDirectory` object performs a lookup in a nominated
+  directory, using the _identity file name_ that may be provided in a
+  token.  That file name will be used to load a file from the key directory,
+  and the token is considered valid if any of the public keys in that file
+  allow a successful verification.
 
 The system presently supports the following key types:
 
-- ECDSA keys using the NIST P-256 curve
+- ECDSA keys using the NIST P-256 or P-384 curve
 - Ed25519 keys
+- Ed25519 and ECDSA P-256 keys stored on a FIDO security key
+  (`sk-ssh-ed25519@openssh.com` and `sk-ecdsa-sha2-nistp256@openssh.com`).
+  These keys can only sign tokens through the SSH agent.
+
+`is_supported_algorithm()` returns whether keys of an algorithm can sign and
+verify tokens.  `keyfile::parse_authorized_keys()` returns keys of every
+algorithm, so pass the algorithms of its keys to `is_supported_algorithm()` to
+reject keys that can never verify a token.
 
 ## Tuneables
 

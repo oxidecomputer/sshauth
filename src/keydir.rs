@@ -5,7 +5,6 @@
 use std::path::{Path, PathBuf};
 
 use anyhow::{anyhow, bail, Result};
-use base64::prelude::*;
 use ssh_key::PublicKey;
 
 use crate::token::TokenIdentity;
@@ -46,25 +45,21 @@ impl KeyDirectory {
                         }
                     })
                     .map(|(n, l)| {
-                        let t = l.split_whitespace().collect::<Vec<_>>();
-                        if t.len() < 2
-                            || (t[0] != "ecdsa-sha2-nistp256"
-                                && t[0] != "ssh-ed25519"
-                                && t[0] != "sk-ssh-ed25519@openssh.com"
-                                && t[0] != "sk-ecdsa-sha2-nistp256@openssh.com")
-                        {
-                            bail!("line {n}: invalid key format");
-                        }
-                        let buf =
-                            BASE64_STANDARD.decode(t[1]).map_err(|e| {
-                                anyhow!("line {n}: decoding key: {e}")
-                            })?;
-                        let mut key = PublicKey::from_bytes(buf.as_slice())
+                        /*
+                         * PublicKey::from_openssh() only accepts a single
+                         * space between fields, but OpenSSH accepts any run
+                         * of spaces and tabs.
+                         */
+                        let l = l.split_whitespace().collect::<Vec<_>>();
+                        let key = PublicKey::from_openssh(&l.join(" "))
                             .map_err(|e| {
                                 anyhow!("line {n}: parsing key: {e}")
                             })?;
-                        if t.len() > 2 {
-                            key.set_comment(t[2..].join(" "));
+                        if !crate::is_supported_algorithm(&key.algorithm()) {
+                            bail!(
+                                "line {n}: unsupported key algorithm: {}",
+                                key.algorithm()
+                            );
                         }
                         Ok(key)
                     })
@@ -85,5 +80,48 @@ impl KeyDirectory {
 
     pub fn dir(&self) -> &Path {
         &self.dir
+    }
+}
+
+#[cfg(test)]
+mod test {
+    use super::*;
+
+    #[test]
+    fn key_algorithms() {
+        /*
+         * keys_for() must only return keys that tokens can be verified with,
+         * and the key type at the start of a line must match the key.  Load
+         * an Ed25519 key, the same key with tabs and runs of spaces between
+         * the fields, an RSA key, and an ECDSA key whose line names
+         * ssh-ed25519.  Check that only the Ed25519 keys load.
+         */
+        let kd = KeyDirectory::new(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/testdata/keydir"
+        ))
+        .unwrap();
+        let keys_for = |name: &str| {
+            kd.keys_for(&TokenIdentity::FileName(name.into()))
+                .map_err(|e| e.to_string())
+        };
+
+        let keys = keys_for("ed25519").unwrap();
+        assert_eq!(keys.len(), 1);
+        assert_eq!(keys[0].algorithm(), ssh_key::Algorithm::Ed25519);
+        assert_eq!(keys[0].comment(), "sshauth-test-1");
+
+        let keys = keys_for("whitespace").unwrap();
+        assert_eq!(keys.len(), 1);
+        assert_eq!(keys[0].algorithm(), ssh_key::Algorithm::Ed25519);
+        assert_eq!(keys[0].comment(), "sshauth test");
+
+        for (name, expected) in [
+            ("rsa", "line 1: unsupported key algorithm: ssh-rsa"),
+            ("mismatch", "line 1: parsing key: unknown algorithm"),
+        ] {
+            let err = keys_for(name).unwrap_err();
+            assert!(err.contains(expected), "{name}: {err}");
+        }
     }
 }

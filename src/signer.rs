@@ -4,7 +4,7 @@
 
 use anyhow::{bail, Result};
 use ecdsa::signature::Signer;
-use ssh_key::{Algorithm, EcdsaCurve, PrivateKey, PublicKey};
+use ssh_key::{Algorithm, PrivateKey, PublicKey};
 
 use crate::token::{
     Token, TokenAction, TokenFingerprint, TokenIdentity, TokenSigningBlobV1,
@@ -82,8 +82,6 @@ impl TokenSigner {
         privkey: PrivateKey,
     ) -> Result<TokenSignerBuilder> {
         match privkey.algorithm() {
-            Algorithm::Ecdsa { curve: EcdsaCurve::NistP256 }
-            | Algorithm::Ed25519 => (),
             Algorithm::SkEd25519 | Algorithm::SkEcdsaSha2NistP256 => {
                 bail!(
                     "key algorithm {} requires a hardware token \
@@ -91,9 +89,10 @@ impl TokenSigner {
                     privkey.algorithm(),
                 );
             }
-            _ => {
-                bail!("unsupported SSH key algorithm: {}", privkey.algorithm())
+            algorithm if !crate::is_supported_algorithm(&algorithm) => {
+                bail!("unsupported SSH key algorithm: {algorithm}")
             }
+            _ => (),
         }
         Ok(TokenSignerBuilder {
             authsock: None,
@@ -202,6 +201,9 @@ impl TokenSignerBuilder {
             }
 
             if let Some(key) = &self.key {
+                if !crate::is_supported_algorithm(&key.algorithm()) {
+                    bail!("unsupported SSH key algorithm: {}", key.algorithm());
+                }
                 TokenSignerMechanism::SshAgent {
                     authsock: authsock.clone(),
                     key: key.clone(),
@@ -294,25 +296,36 @@ impl TokenBuilder<'_> {
                 agent::sign(authsock, key, &blob).await?
             }
             TokenSignerMechanism::Key { privkey } => {
-                match privkey.algorithm() {
-                    Algorithm::Ecdsa { curve: EcdsaCurve::NistP256 }
-                    | Algorithm::Ed25519 => {
-                        privkey.key_data().try_sign(&blob)?
-                    }
-                    _ => {
-                        /*
-                         * This should not happen, because the builder restricts
-                         * the key algorithms we are willing to accept.
-                         */
-                        bail!(
-                            "unsupported key algorithm: {}",
-                            privkey.algorithm(),
-                        );
-                    }
-                }
+                privkey.key_data().try_sign(&blob)?
             }
         };
 
         Ok(self.blob.into_token(sig.try_into()?))
+    }
+}
+
+#[cfg(test)]
+mod test {
+    use super::*;
+
+    #[test]
+    fn agent_key_algorithm() {
+        /*
+         * build() must reject an SSH agent key of an algorithm that tokens
+         * can't carry, before the agent is asked to sign anything.  Build a
+         * signer for an RSA public key and check that it fails.
+         */
+        let key =
+            PublicKey::from_openssh(include_str!("../testdata/keydir/rsa"))
+                .unwrap();
+        let err = TokenSigner::using_authsock("/nonexistent")
+            .unwrap()
+            .key(key)
+            .identity_filename("rsa")
+            .build()
+            .err()
+            .unwrap()
+            .to_string();
+        assert_eq!(err, "unsupported SSH key algorithm: ssh-rsa");
     }
 }

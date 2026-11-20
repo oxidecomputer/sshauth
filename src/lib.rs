@@ -4,6 +4,8 @@
 
 use std::time::{SystemTime, UNIX_EPOCH};
 
+use ssh_key::Algorithm;
+
 const MAGIC_PREFIX_DEFAULT: [u8; 8] = *b"byo.e.m.";
 
 const MAGIC_SUPER_PREFIX: [u8; 6] = *b"oxauth";
@@ -20,7 +22,19 @@ pub use signer::TokenSigner;
 pub use ssh_key::{PrivateKey, PublicKey};
 pub use unverified::UnverifiedToken;
 
-use token::TokenIdentity;
+use token::{TokenIdentity, TokenSignatureAlgorithm};
+
+/**
+ * Returns whether tokens can be signed and verified with keys of the given
+ * algorithm.  Keys of the FIDO security key algorithms
+ * (sk-ssh-ed25519@openssh.com and sk-ecdsa-sha2-nistp256@openssh.com) can
+ * only sign through an SSH agent.  Consumers can use this to reject keys that
+ * can never verify a token when the keys are configured, rather than when a
+ * token fails to verify.
+ */
+pub fn is_supported_algorithm(algorithm: &Algorithm) -> bool {
+    TokenSignatureAlgorithm::from_ssh(algorithm).is_ok()
+}
 
 fn now_secs() -> u64 {
     SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_secs()
@@ -78,6 +92,7 @@ impl std::fmt::Display for VerifiedToken {
 mod test {
     use crate::*;
     use anyhow::{bail, Result};
+    use ssh_key::EcdsaCurve;
 
     #[allow(unused)]
     struct TestKey {
@@ -154,6 +169,28 @@ mod test {
         .into_iter()
         .map(load_key)
         .collect::<Result<Vec<_>>>()
+    }
+
+    #[test]
+    fn supported_algorithms() {
+        /*
+         * Check is_supported_algorithm() against a list of the algorithms
+         * that tokens can and can't carry a signature of.
+         */
+        for (algorithm, supported) in [
+            (Algorithm::Ecdsa { curve: EcdsaCurve::NistP256 }, true),
+            (Algorithm::Ed25519, true),
+            (Algorithm::SkEd25519, true),
+            (Algorithm::SkEcdsaSha2NistP256, true),
+            (Algorithm::Rsa { hash: None }, false),
+            (Algorithm::Dsa, false),
+        ] {
+            assert_eq!(
+                is_supported_algorithm(&algorithm),
+                supported,
+                "{algorithm}"
+            );
+        }
     }
 
     #[tokio::test]

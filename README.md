@@ -141,6 +141,11 @@ The system presently supports the following key types:
 - ECDSA keys using the NIST P-256 curve
 - Ed25519 keys
 
+`is_supported_algorithm()` returns whether keys of an algorithm can sign and
+verify tokens.  `keyfile::parse_authorized_keys()` returns keys of every
+algorithm, so pass the algorithms of its keys to `is_supported_algorithm()` to
+reject keys that can never verify a token.
+
 ## Tuneables
 
 There are many other tunable token parameters (expiration, signing strategy,

@@ -237,6 +237,144 @@ mod test {
         Ok(())
     }
 
+    /**
+     * An ssh-agent that a test started.  Dropping it kills the agent and
+     * removes its directory, also when the test panics.
+     */
+    struct TestAgent {
+        child: std::process::Child,
+        dir: std::path::PathBuf,
+        sock: std::path::PathBuf,
+    }
+
+    impl Drop for TestAgent {
+        fn drop(&mut self) {
+            let _ = self.child.kill();
+            let _ = self.child.wait();
+            let _ = std::fs::remove_dir_all(&self.dir);
+        }
+    }
+
+    impl TestAgent {
+        /**
+         * Starts an ssh-agent with a socket in a new directory.  Returns None
+         * when ssh-agent isn't installed.
+         */
+        async fn start() -> Result<Option<TestAgent>> {
+            use std::os::unix::fs::DirBuilderExt;
+            use std::process::{Command, Stdio};
+
+            /*
+             * A test run that was killed can leave its directory behind.
+             * Remove it, and create the directory so that it fails if it
+             * still exists, for example because another user created it.
+             */
+            let dir = std::env::temp_dir()
+                .join(format!("sshauth-agent-test-{}", std::process::id()));
+            let _ = std::fs::remove_dir_all(&dir);
+            std::fs::DirBuilder::new().mode(0o700).create(&dir)?;
+            let sock = dir.join("agent.sock");
+            let child = match Command::new("ssh-agent")
+                .arg("-D")
+                .arg("-a")
+                .arg(&sock)
+                .stdout(Stdio::null())
+                .spawn()
+            {
+                Ok(child) => child,
+                Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
+                    std::fs::remove_dir(&dir)?;
+                    return Ok(None);
+                }
+                Err(e) => return Err(e.into()),
+            };
+            let mut agent = TestAgent { child, dir, sock };
+
+            /*
+             * ssh-agent creates the socket file before it listens on it, and
+             * exits if it can't, for example when the path is too long for a
+             * socket.  Wait until a connection succeeds.
+             */
+            for _ in 0..500 {
+                if std::os::unix::net::UnixStream::connect(&agent.sock).is_ok()
+                {
+                    return Ok(Some(agent));
+                }
+                if let Some(status) = agent.child.try_wait()? {
+                    bail!("ssh-agent exited with {status}");
+                }
+                tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+            }
+            bail!("can't connect to ssh-agent at {:?}", agent.sock);
+        }
+
+        fn add(&self, privkey: &str) -> std::io::Result<()> {
+            use std::io::Write;
+            use std::process::{Command, Stdio};
+
+            let mut ssh_add = Command::new("ssh-add")
+                .arg("-q")
+                .arg("-")
+                .env("SSH_AUTH_SOCK", &self.sock)
+                .stdin(Stdio::piped())
+                .spawn()?;
+            let res =
+                ssh_add.stdin.take().unwrap().write_all(privkey.as_bytes());
+            let status = ssh_add.wait()?;
+            /*
+             * When ssh-add exits early, writing the key fails with EPIPE.
+             * Its exit status says more about why.
+             */
+            if !status.success() {
+                return Err(std::io::Error::other(format!(
+                    "ssh-add exited with {status}"
+                )));
+            }
+            res
+        }
+    }
+
+    #[tokio::test]
+    async fn agent_signing() -> Result<()> {
+        /*
+         * Tokens signed through an SSH agent must verify with the public key
+         * of the signing key.  Start an ssh-agent, add every test key to it,
+         * and sign and verify a token with each key through the agent.  Skip
+         * the test when OpenSSH isn't installed.
+         */
+        let Some(agent) = TestAgent::start().await? else {
+            println!("skipping, ssh-agent is not installed");
+            return Ok(());
+        };
+        let authsock = agent.sock.to_str().unwrap();
+
+        for tk in load_all_keys()? {
+            match agent.add(tk.privkey_str) {
+                Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
+                    println!("skipping, ssh-add is not installed");
+                    return Ok(());
+                }
+                res => res?,
+            }
+
+            let ts = TokenSigner::using_authsock(authsock)?
+                .key(tk.pubkey.clone())
+                .magic_prefix(*b"abcdefgh")
+                .identity_filename(tk.id)
+                .build()?;
+            let tok = ts.sign_for().action("a", "b").sign().await?.encode();
+
+            UnverifiedToken::try_from(tok.as_str())?
+                .verify_for()
+                .magic_prefix(*b"abcdefgh")
+                .action("a", "b")
+                .with_key(&tk.pubkey)?;
+            println!("   agent signed and verified with {}", tk.id);
+        }
+
+        Ok(())
+    }
+
     #[tokio::test]
     async fn old_sigs() -> Result<()> {
         println!();

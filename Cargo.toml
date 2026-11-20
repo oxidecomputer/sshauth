@@ -26,4 +26,4 @@ ssh-key = { version = "0.6.7", features = ["p256", "ed25519"] }
 tokio = { version = "1", features = ["io-util", "net"] }
 
 [dev-dependencies]
-tokio = { version = "1", features = ["io-util", "net", "macros", "rt"] }
+tokio = { version = "1", features = ["io-util", "net", "macros", "rt", "time"] }

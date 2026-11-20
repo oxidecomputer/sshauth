@@ -291,6 +291,7 @@ pub(crate) enum TokenSignatureAlgorithm {
     Ed25519,
     SkEd25519,
     SkEcdsaSha2NistP256,
+    Ecdsa384,
 }
 
 impl TokenSignatureAlgorithm {
@@ -299,6 +300,9 @@ impl TokenSignatureAlgorithm {
             ssh_key::Algorithm::Ecdsa {
                 curve: ssh_key::EcdsaCurve::NistP256,
             } => TokenSignatureAlgorithm::Ecdsa256,
+            ssh_key::Algorithm::Ecdsa {
+                curve: ssh_key::EcdsaCurve::NistP384,
+            } => TokenSignatureAlgorithm::Ecdsa384,
             ssh_key::Algorithm::Ed25519 => TokenSignatureAlgorithm::Ed25519,
             ssh_key::Algorithm::SkEd25519 => TokenSignatureAlgorithm::SkEd25519,
             ssh_key::Algorithm::SkEcdsaSha2NistP256 => {
@@ -312,6 +316,9 @@ impl TokenSignatureAlgorithm {
         match self {
             TokenSignatureAlgorithm::Ecdsa256 => ssh_key::Algorithm::Ecdsa {
                 curve: ssh_key::EcdsaCurve::NistP256,
+            },
+            TokenSignatureAlgorithm::Ecdsa384 => ssh_key::Algorithm::Ecdsa {
+                curve: ssh_key::EcdsaCurve::NistP384,
             },
             TokenSignatureAlgorithm::Ed25519 => ssh_key::Algorithm::Ed25519,
             TokenSignatureAlgorithm::SkEd25519 => ssh_key::Algorithm::SkEd25519,
@@ -661,11 +668,12 @@ mod test {
      * Every TokenSignatureAlgorithm variant with the index that postcard
      * encodes it as.
      */
-    const SIGNATURE_ALGORITHMS: [(TokenSignatureAlgorithm, u8); 4] = [
+    const SIGNATURE_ALGORITHMS: [(TokenSignatureAlgorithm, u8); 5] = [
         (TokenSignatureAlgorithm::Ecdsa256, 0),
         (TokenSignatureAlgorithm::Ed25519, 1),
         (TokenSignatureAlgorithm::SkEd25519, 2),
         (TokenSignatureAlgorithm::SkEcdsaSha2NistP256, 3),
+        (TokenSignatureAlgorithm::Ecdsa384, 4),
     ];
 
     #[test]

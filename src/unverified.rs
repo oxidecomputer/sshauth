@@ -177,9 +177,9 @@ impl UnverifiedTokenVerification {
             }
 
             let verified = match key.key_data() {
-                ssh_key::public::KeyData::Ecdsa(
-                    pk @ ssh_key::public::EcdsaPublicKey::NistP256(..),
-                ) => pk.verify(&blob, &sig).is_ok(),
+                ssh_key::public::KeyData::Ecdsa(pk) => {
+                    pk.verify(&blob, &sig).is_ok()
+                }
                 ssh_key::public::KeyData::Ed25519(pk) => {
                     pk.verify(&blob, &sig).is_ok()
                 }

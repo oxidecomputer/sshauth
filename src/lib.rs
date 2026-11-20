@@ -167,7 +167,10 @@ mod test {
     }
 
     fn load_all_keys() -> Result<Vec<TestKey>> {
-        load_keys!("ecdsa256").chain(load_keys!("ed25519")).collect()
+        load_keys!("ecdsa256")
+            .chain(load_keys!("ecdsa384"))
+            .chain(load_keys!("ed25519"))
+            .collect()
     }
 
     #[test]
@@ -178,6 +181,8 @@ mod test {
          */
         for (algorithm, supported) in [
             (Algorithm::Ecdsa { curve: EcdsaCurve::NistP256 }, true),
+            (Algorithm::Ecdsa { curve: EcdsaCurve::NistP384 }, true),
+            (Algorithm::Ecdsa { curve: EcdsaCurve::NistP521 }, false),
             (Algorithm::Ed25519, true),
             (Algorithm::SkEd25519, true),
             (Algorithm::SkEcdsaSha2NistP256, true),

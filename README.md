@@ -138,7 +138,7 @@ system:
 
 The system presently supports the following key types:
 
-- ECDSA keys using the NIST P-256 curve
+- ECDSA keys using the NIST P-256 or P-384 curve
 - Ed25519 keys
 
 `is_supported_algorithm()` returns whether keys of an algorithm can sign and
